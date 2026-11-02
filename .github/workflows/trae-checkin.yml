@@ -1,29 +1,30 @@
 name: Trae 每日签到
 
 on:
-  push:
-    branches:
-      - main
   schedule:
-    - cron: '0 0 * * *'
+    # 每天 08:30（北京时间 = 00:30 UTC）。GitHub 定时任务可能延迟几分钟到十几分钟。
+    - cron: '30 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trae-checkin
+  cancel-in-progress: false
 
 jobs:
   checkin:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Run checkin
-        run: node checkin.js
+      - name: 执行签到
         env:
-          API_KEY: ${{ secrets.API_KEY }}
-          USER_ID: ${{ secrets.USER_ID }}
+          TRAE_CREDENTIALS: ${{ secrets.TRAE_CREDENTIALS }}
+        run: node checkin.js
