@@ -1,29 +1,23 @@
 name: Trae 每日签到
-
 on:
   schedule:
     # 每天 08:30（北京时间 = 00:30 UTC）。GitHub 定时任务可能延迟几分钟到十几分钟。
     - cron: '30 0 * * *'
   workflow_dispatch:
-
 permissions:
   contents: read
-
 concurrency:
   group: trae-checkin
   cancel-in-progress: false
-
 jobs:
   checkin:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: 执行签到
         env:
           TRAE_CREDENTIALS: ${{ secrets.TRAE_CREDENTIALS }}
