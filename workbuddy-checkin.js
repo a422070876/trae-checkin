@@ -1,30 +1,29 @@
-// WorkBuddy（CodeBuddy 桌面端）每日签到
-// 凭据来自环境变量 WORKBUDDY_CREDENTIALS：
-//   { accessToken, uid, domain, expiresAt }
+// WorkBuddy（CodeBuddy 桌面端）每日签到，支持多账号
+// 凭据来自环境变量 WORKBUDDY_CREDENTIALS，可以是单个对象或数组：
+//   [{ accessToken, uid, domain, expiresAt, accountName }, ...]
 const API_BASE = 'https://www.codebuddy.cn/v2/billing/meter';
 const STATUS_PATH = '/checkin-activity-status';
 const CLAIM_PATH = '/daily-checkin';
 
-function log(msg) {
-  console.log(`[${new Date().toISOString()}] [WorkBuddy] ${msg}`);
+function log(tag, msg) {
+  console.log(`[${new Date().toISOString()}] [WorkBuddy]${tag ? ` [${tag}]` : ''} ${msg}`);
 }
 
-function fail(msg) {
-  log(`ERROR: ${msg}`);
-  process.exit(1);
-}
-
-function loadCredentials() {
+function loadAccounts() {
   const raw = process.env.WORKBUDDY_CREDENTIALS;
-  if (!raw) fail('缺少 WORKBUDDY_CREDENTIALS');
-  let cred;
+  if (!raw) throw new Error('缺少 WORKBUDDY_CREDENTIALS');
+  let parsed;
   try {
-    cred = JSON.parse(raw);
+    parsed = JSON.parse(raw);
   } catch (e) {
-    fail(`WORKBUDDY_CREDENTIALS 不是合法 JSON: ${e.message}`);
+    throw new Error(`WORKBUDDY_CREDENTIALS 不是合法 JSON: ${e.message}`);
   }
-  if (!cred.accessToken || !cred.uid) fail('凭据缺少 accessToken 或 uid');
-  return cred;
+  const list = Array.isArray(parsed) ? parsed : [parsed];
+  if (!list.length) throw new Error('WORKBUDDY_CREDENTIALS 为空');
+  for (const c of list) {
+    if (!c.accessToken || !c.uid) throw new Error('凭据缺少 accessToken 或 uid');
+  }
+  return list;
 }
 
 async function api(path, cred, attempt = 1) {
@@ -48,7 +47,7 @@ async function api(path, cred, attempt = 1) {
       throw err;
     }
     if (res.status >= 500 && attempt < 3) {
-      log(`HTTP ${res.status}，第 ${attempt} 次重试`);
+      log('', `HTTP ${res.status}，第 ${attempt} 次重试`);
       await new Promise((r) => setTimeout(r, 3000 * attempt));
       return api(path, cred, attempt + 1);
     }
@@ -57,7 +56,7 @@ async function api(path, cred, attempt = 1) {
   } catch (e) {
     if (e.auth) throw e;
     if (attempt < 3 && (e.name === 'AbortError' || e.name === 'TypeError')) {
-      log(`请求异常（${e.message}），第 ${attempt} 次重试`);
+      log('', `请求异常（${e.message}），第 ${attempt} 次重试`);
       await new Promise((r) => setTimeout(r, 3000 * attempt));
       return api(path, cred, attempt + 1);
     }
@@ -65,43 +64,68 @@ async function api(path, cred, attempt = 1) {
   }
 }
 
-async function main() {
-  const cred = loadCredentials();
+async function checkinOne(cred) {
+  const tag = (cred.accountName || cred.uid || '').slice(0, 40);
   if (cred.expiresAt && cred.expiresAt <= Date.now()) {
-    fail('accessToken 已过期，请确认本机 WorkBuddy 已刷新并同步 Secret');
+    log(tag, 'accessToken 已过期，请确认本机 WorkBuddy 已刷新并同步 Secret');
+    return false;
   }
 
   let status;
   try {
     status = await api(STATUS_PATH, cred);
   } catch (e) {
-    fail(`查询签到状态失败：${e.message}`);
+    log(tag, `查询签到状态失败：${e.message}`);
+    return false;
   }
-  if (status.code !== 0) fail(`查询签到状态异常：${status.msg || JSON.stringify(status)}`);
+  if (status.code !== 0) {
+    log(tag, `查询签到状态异常：${status.msg || JSON.stringify(status)}`);
+    return false;
+  }
 
   const data = status.data || {};
   if (data.today_checked_in) {
-    log(`今日已签到，当前连签 ${data.streak_days} 天`);
-    return;
+    log(tag, `今日已签到，当前连签 ${data.streak_days} 天`);
+    return true;
   }
 
   let claim;
   try {
     claim = await api(CLAIM_PATH, cred);
   } catch (e) {
-    fail(`领取积分失败：${e.message}`);
+    log(tag, `领取积分失败：${e.message}`);
+    return false;
   }
   if (claim.code === 0) {
     const c = claim.data || {};
     const bonus = c.streak_bonus_credit ? `，连签大奖 +${c.streak_bonus_credit}` : '';
-    log(`签到成功，获得 ${c.today_credit ?? data.daily_credit ?? '?'} 积分，当前连签 ${c.streak_days ?? data.streak_days ?? '?'} 天${bonus}`);
-    return;
+    log(tag, `签到成功，获得 ${c.today_credit ?? data.daily_credit ?? '?'} 积分，当前连签 ${c.streak_days ?? data.streak_days ?? '?'} 天${bonus}`);
+    return true;
   }
   if (claim.code === 10001) {
-    log('今日已签到（接口幂等返回）');
-    return;
+    log(tag, '今日已签到（接口幂等返回）');
+    return true;
   }
-  fail(`签到失败：${claim.msg || JSON.stringify(claim)}`);
+  log(tag, `签到失败：${claim.msg || JSON.stringify(claim)}`);
+  return false;
 }
 
-main().catch((e) => fail(e.message));
+async function main() {
+  const accounts = loadAccounts();
+  log('', `共 ${accounts.length} 个 WorkBuddy 账号`);
+  const results = [];
+  for (const cred of accounts) {
+    results.push(await checkinOne(cred));
+  }
+  const failed = results.filter((ok) => !ok).length;
+  if (failed) {
+    console.error(`[WorkBuddy] ${failed}/${accounts.length} 个账号签到失败`);
+    process.exit(1);
+  }
+  log('', '全部账号处理完成');
+}
+
+main().catch((e) => {
+  console.error(`[WorkBuddy] ERROR: ${e.message}`);
+  process.exit(1);
+});
