@@ -1,0 +1,24 @@
+name: Trae 每日签到（账号 B）
+on:
+  schedule:
+    # 每天 08:30（北京时间 = 00:30 UTC）。比账号 A 晚约 30 分钟。
+    - cron: '30 0 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: trae-checkin-2
+  cancel-in-progress: false
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: 执行签到
+        env:
+          TRAE_CREDENTIALS: ${{ secrets.TRAE_CREDENTIALS_2 }}
+        run: node checkin.js
