@@ -67,7 +67,7 @@ async function api(path, cred, attempt = 1) {
 
 async function main() {
   const cred = loadCredentials();
-  if (cred.expiresAt && cred.expiresAt / 1000 <= Date.now()) {
+  if (cred.expiresAt && cred.expiresAt <= Date.now()) {
     fail('accessToken 已过期，请确认本机 WorkBuddy 已刷新并同步 Secret');
   }
 
