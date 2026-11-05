@@ -19,6 +19,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: 调试凭据
+        env:
+          C: ${{ secrets.TRAE_CREDENTIALS }}
+        run: |
+          echo "len=${#C}"
+          printf '%s' "$C" | md5sum | cut -d' ' -f1
       - name: 执行签到
         env:
           TRAE_CREDENTIALS: ${{ secrets.TRAE_CREDENTIALS }}
