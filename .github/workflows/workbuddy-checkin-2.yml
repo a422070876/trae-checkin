@@ -20,6 +20,6 @@ jobs:
           node-version: '20'
       - name: 执行签到（账号 2）
         env:
-          WORKBUDDY_CREDENTIALS: ${ secrets.WORKBUDDY_CREDENTIALS }
+          WORKBUDDY_CREDENTIALS: ${{ secrets.WORKBUDDY_CREDENTIALS }}
           WORKBUDDY_ACCOUNT_INDEX: '2'
         run: node workbuddy-checkin.js
