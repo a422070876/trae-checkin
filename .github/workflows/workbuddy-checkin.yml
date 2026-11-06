@@ -1,13 +1,13 @@
-name: WorkBuddy 每日签到
+name: WorkBuddy 每日签到（账号 1）
 on:
   schedule:
-    # WorkBuddy：在账号 B 之后 30 分钟（UTC 2,6,10,14,18,22 点 :07）。
+    # WorkBuddy 账号 1：在 Trae 账号 B 之后 30 分钟（UTC 2,6,10,14,18,22 点 :07）。
     - cron: '7 2,6,10,14,18,22 * * *'
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: workbuddy-checkin
+  group: workbuddy-checkin-1
   cancel-in-progress: false
 jobs:
   checkin:
@@ -18,7 +18,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: 执行签到
+      - name: 执行签到（账号 1）
         env:
-          WORKBUDDY_CREDENTIALS: ${{ secrets.WORKBUDDY_CREDENTIALS }}
+          WORKBUDDY_CREDENTIALS: ${ secrets.WORKBUDDY_CREDENTIALS }
+          WORKBUDDY_ACCOUNT_INDEX: '1'
         run: node workbuddy-checkin.js
