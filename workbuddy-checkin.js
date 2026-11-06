@@ -23,6 +23,15 @@ function loadAccounts() {
   for (const c of list) {
     if (!c.accessToken || !c.uid) throw new Error('凭据缺少 accessToken 或 uid');
   }
+  // 可选：WORKBUDDY_ACCOUNT_INDEX=1/2 时只处理指定序号的账号（用于账号错峰签到）
+  const idx = process.env.WORKBUDDY_ACCOUNT_INDEX;
+  if (idx) {
+    const n = Number(idx);
+    if (!Number.isInteger(n) || n < 1 || n > list.length) {
+      throw new Error(`WORKBUDDY_ACCOUNT_INDEX=${idx} 越界（共 ${list.length} 个账号）`);
+    }
+    return [list[n - 1]];
+  }
   return list;
 }
 
