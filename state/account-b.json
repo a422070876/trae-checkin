@@ -1,8 +1,8 @@
 {
-  "date": "2026-11-08",
+  "date": "2026-11-09",
   "success": true,
-  "credits": 100,
-  "source": "server-status",
+  "credits": 200,
+  "source": "claim",
   "lastError": null,
-  "updatedAt": "2026-11-08T14:54:51.377Z"
+  "updatedAt": "2026-11-08T16:15:16.355Z"
 }
