@@ -9,16 +9,21 @@ const path = require('path');
 
 const STATUS_URL = 'https://api.trae.cn/trae/api/v2/ug/checkin_credits/status';
 const CLAIM_URL = 'https://api.trae.cn/trae/api/v2/ug/checkin_credits/claim';
-const MAX_ATTEMPTS = 6;         // 每个阶段最多尝试次数
-const RETRY_MIN_MS = 5000;
-const RETRY_MAX_MS = 15000;
+const MAX_ATTEMPTS = 24;        // 每个阶段最多尝试次数
+const RETRY_MIN_MS = 8000;      // 首次重试等待
+const RETRY_MAX_MS = 90000;     // 单次等待上限
+const RETRY_BUDGET_MS = 11 * 60 * 1000; // 总重试预算（workflow 超时 15 分钟）
 const RETRYABLE_CODES = new Set([9074, 429, 500, 502, 503, 504]);
 
 function log(msg) {
   console.log(`[${new Date().toISOString()}] ${msg}`);
 }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-const randDelay = () => RETRY_MIN_MS + Math.random() * (RETRY_MAX_MS - RETRY_MIN_MS);
+// 指数退避 + 抖动：8s, 16s, 32s, 64s, 90s, 90s...
+const backoff = (attempt) => {
+  const base = Math.min(RETRY_MIN_MS * Math.pow(2, attempt - 1), RETRY_MAX_MS);
+  return Math.round(base * (0.8 + Math.random() * 0.4));
+};
 
 function fail(msg) {
   log(`ERROR: ${msg}`);
@@ -52,7 +57,8 @@ function isRetryable(res, j) {
   return false;
 }
 
-async function postJson(url, headers) {
+async function postJson(url, headers, budgetMs = RETRY_BUDGET_MS) {
+  const startedAt = Date.now();
   let lastErr = 'unknown';
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
@@ -60,15 +66,18 @@ async function postJson(url, headers) {
       const j = await res.json();
       if (isRetryable(res, j)) {
         lastErr = `code=${j.code ?? res.status} ${j.message || ''}`.trim();
-        log(`服务器繁忙(${lastErr})，第 ${attempt}/${MAX_ATTEMPTS} 次重试...`);
+        const usedSec = Math.round((Date.now() - startedAt) / 1000);
+        log(`服务器繁忙(${lastErr})，第 ${attempt}/${MAX_ATTEMPTS} 次，已等待 ${usedSec}s`);
       } else {
         return j;
       }
     } catch (e) {
       lastErr = e.message;
-      log(`请求异常: ${e.message}，第 ${attempt}/${MAX_ATTEMPTS} 次重试...`);
+      log(`请求异常: ${e.message}，第 ${attempt}/${MAX_ATTEMPTS} 次`);
     }
-    if (attempt < MAX_ATTEMPTS) await sleep(randDelay());
+    const wait = backoff(attempt);
+    if (attempt >= MAX_ATTEMPTS || Date.now() - startedAt + wait > budgetMs) break;
+    await sleep(wait);
   }
   throw new Error(`重试 ${MAX_ATTEMPTS} 次后仍失败: ${lastErr}`);
 }
