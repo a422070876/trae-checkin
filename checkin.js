@@ -40,6 +40,33 @@ function loadCreds() {
   fail('未找到登录凭据：请设置 TRAE_CREDENTIALS 或在本目录放置 credentials.json');
 }
 
+// ---------- 签到状态记录（跨定时任务持久化） ----------
+// 状态文件由 CHECKIN_STATE_FILE 指定，云端由 workflow 提交回仓库
+const STATE_FILE = process.env.CHECKIN_STATE_FILE || path.join(__dirname, 'checkin-state.json');
+
+// 以北京时间（UTC+8）作为“今天”，避免 UTC 跨天导致重复签到
+function todayKey() {
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+function loadState() {
+  try {
+    if (!fs.existsSync(STATE_FILE)) return {};
+    return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+  } catch (_) { return {}; }
+}
+
+function saveState(patch) {
+  const next = { ...loadState(), ...patch, updatedAt: new Date().toISOString() };
+  try {
+    fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
+    fs.writeFileSync(STATE_FILE, JSON.stringify(next, null, 2) + '\n');
+    log(`状态已记录: ${STATE_FILE}`);
+  } catch (e) {
+    log(`警告: 状态文件写入失败（不影响签到）: ${e.message}`);
+  }
+}
+
 function jwtExpireAt(token) {
   try {
     const p = token.split('.')[1];
@@ -86,6 +113,16 @@ async function postJson(url, headers, budgetMs = RETRY_BUDGET_MS) {
   log('=== 开始签到（云端） ===');
   log(`运行环境: ${process.platform} / node ${process.version}`);
 
+  const today = todayKey();
+  const state = loadState();
+  if (state.date === today && state.success === true) {
+    log(`状态记录：${today} 已签到成功（积分: ${state.credits ?? '未知'}，来源: ${state.source ?? '未知'}），跳过本次`);
+    return;
+  }
+  if (state.date === today) {
+    log(`状态记录：${today} 上次未成功（${state.lastError ?? '未知原因'}），继续尝试`);
+  }
+
   const creds = loadCreds();
   if (!creds.token) fail('凭据中缺少 token，请重新导出');
 
@@ -115,6 +152,7 @@ async function postJson(url, headers, budgetMs = RETRY_BUDGET_MS) {
   }
   if (sd.checked_in) {
     log(`今日已签到，当前积分: ${sd.credits ?? '未知'}`);
+    saveState({ date: today, success: true, credits: sd.credits ?? null, source: 'server-status', lastError: null });
     return;
   }
   if (sd.enable === false) {
@@ -128,7 +166,13 @@ async function postJson(url, headers, budgetMs = RETRY_BUDGET_MS) {
   const cd = claim.data || claim;
   if (claim.code === 0 || cd.checked_in) {
     log(`签到成功！获得积分: ${cd.credits ?? 200}`);
+    saveState({ date: today, success: true, credits: cd.credits ?? 200, source: 'claim', lastError: null });
   } else {
-    fail(`签到失败: ${claim.message || JSON.stringify(claim)}`);
+    const reason = claim.message || JSON.stringify(claim);
+    saveState({ date: today, success: false, credits: null, source: 'claim', lastError: reason });
+    fail(`签到失败: ${reason}`);
   }
-})().catch(e => fail(e.message));
+})().catch(e => {
+  saveState({ date: todayKey(), success: false, lastError: e.message });
+  fail(e.message);
+});

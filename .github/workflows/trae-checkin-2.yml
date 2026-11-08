@@ -2,10 +2,11 @@ name: Trae 每日签到（账号 B）
 on:
   schedule:
     # 账号 B：在账号 A 之后 30 分钟（UTC 1,5,9,13,17,21 点 :37）。
+    # 每次运行先读 state/account-b.json：当天已成功则直接跳过，未成功则继续签到
     - cron: '37 1,5,9,13,17,21 * * *'
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: trae-checkin-2
   cancel-in-progress: false
@@ -21,4 +22,25 @@ jobs:
       - name: 执行签到
         env:
           TRAE_CREDENTIALS: ${{ secrets.TRAE_CREDENTIALS_2 }}
+          CHECKIN_STATE_FILE: state/account-b.json
         run: node checkin.js
+      - name: 提交签到状态
+        if: always()
+        run: |
+          if [ -z "$(git status --porcelain state/)" ]; then
+            echo "签到状态无变化，无需提交"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/
+          git commit -m "chore: 更新账号 B 签到状态 [skip ci]"
+          for i in 1 2 3 4 5; do
+            if git pull --rebase --autostash origin main && git push; then
+              echo "状态已提交"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "状态提交失败" >&2
+          exit 1
